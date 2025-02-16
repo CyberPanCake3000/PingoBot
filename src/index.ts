@@ -65,21 +65,18 @@ function parseInterval(value: string): { minutes: number; error?: string } {
 }
 
 async function formatUrl(url: string): Promise<string> {
-  // Если протокол уже указан, оставляем как есть
   if (url.startsWith('http://') || url.startsWith('https://')) {
     return url;
   }
 
-  // Пробуем сначала HTTPS
   try {
     const httpsUrl = `https://${url}`;
     const response = await axios.get(httpsUrl, { 
       timeout: 5000,
-      validateStatus: () => true // Принимаем любой статус ответа
+      validateStatus: () => true 
     });
     return httpsUrl;
   } catch (error) {
-    // Если HTTPS не работает, пробуем HTTP
     try {
       const httpUrl = `http://${url}`;
       const response = await axios.get(httpUrl, { 
@@ -88,7 +85,6 @@ async function formatUrl(url: string): Promise<string> {
       });
       return httpUrl;
     } catch (error) {
-      // Если оба варианта не работают, возвращаем HTTPS по умолчанию
       return `https://${url}`;
     }
   }
@@ -162,7 +158,7 @@ bot.command('list', async (ctx) => {
 });
 
 bot.command('remove', async (ctx) => {
-  const url = ctx.match;
+  let url = await formatUrl(ctx.match);
   if (!url) {
     return ctx.reply('Usage: /remove <url>');
   }
