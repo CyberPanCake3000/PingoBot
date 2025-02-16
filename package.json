@@ -18,5 +18,11 @@
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.7",
+    "grammy": "^1.35.0",
+    "mongoose": "^8.10.1"
   }
 }
