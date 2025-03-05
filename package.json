@@ -7,7 +7,10 @@
     "dev": "nodemon src/index.ts",
     "build": "tsc",
     "watch": "tsc -w",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "lint": "eslint .",
+    "fix": "eslint . --fix",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepare": "husky install"
   },
   "keywords": [],
   "author": "",
@@ -15,6 +18,7 @@
   "description": "",
   "devDependencies": {
     "@types/node": "^22.13.4",
+    "husky": "^9.1.7",
     "nodemon": "^3.1.9",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
@@ -24,5 +28,8 @@
     "dotenv": "^16.4.7",
     "grammy": "^1.35.0",
     "mongoose": "^8.10.1"
+  },
+  "lint-staged": {
+    "*.{js,ts}": "eslint --fix"
   }
 }

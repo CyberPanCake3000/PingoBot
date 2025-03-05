@@ -71,20 +71,22 @@ async function formatUrl(url: string): Promise<string> {
 
   try {
     const httpsUrl = `https://${url}`;
-    const response = await axios.get(httpsUrl, { 
+    await axios.get(httpsUrl, { 
       timeout: 5000,
       validateStatus: () => true 
     });
     return httpsUrl;
   } catch (error) {
+    console.log(error);
     try {
       const httpUrl = `http://${url}`;
-      const response = await axios.get(httpUrl, { 
+      await axios.get(httpUrl, { 
         timeout: 5000,
         validateStatus: () => true
       });
       return httpUrl;
     } catch (error) {
+      console.log(error);
       return `https://${url}`;
     }
   }
@@ -118,7 +120,7 @@ bot.command('add', async (ctx) => {
   }
 
   try {
-    const site = await SiteModel.create({
+    await SiteModel.create({
       url: formattedUrl,
       userId: ctx.from.id.toString(),
       chatId: ctx.chat.id.toString(),
@@ -136,6 +138,7 @@ bot.command('add', async (ctx) => {
       `⏰ Check interval: ${intervalText}`
     );
   } catch (error) {
+    console.log(error);
     await ctx.reply('❌ Error adding site to monitoring');
   }
 });
@@ -158,7 +161,7 @@ bot.command('list', async (ctx) => {
 });
 
 bot.command('remove', async (ctx) => {
-  let url = await formatUrl(ctx.match);
+  const url = await formatUrl(ctx.match);
   if (!url) {
     return ctx.reply('Usage: /remove <url>');
   }
@@ -170,21 +173,37 @@ bot.command('remove', async (ctx) => {
     );
     await ctx.reply(`Removed ${url} from monitoring`);
   } catch (error) {
+    console.log(error);
     await ctx.reply('Error removing site from monitoring');
   }
 });
 
 bot.command('ping', async (ctx) => {
-  const url = ctx.match;
-  if (!url) {
+  const arg = ctx.match;
+  if (!arg) {
     return ctx.reply('Usage: /ping <url>');
   }
 
+  if (arg === 'all') {
+    const sites = await SiteModel.find({
+      chatId: ctx.chat.id.toString(),
+      isActive: true,
+    });
+    let message = '';
+    for (const site of sites) {
+      const result = await monitorService.checkSite(site.url);
+      const line = `Status for ${site.url}:\nStatus: ${result.status}\n${result.error ? `Error: ${result.error}` : ''}`;
+      message += line + '\n';
+    }
+    await ctx.reply(message);
+  }
+
   try {
-    const result = await monitorService.checkSite(url);
-    const message = `Status for ${url}:\nStatus: ${result.status}\n${result.error ? `Error: ${result.error}` : ''}`;
+    const result = await monitorService.checkSite(arg);
+    const message = `Status for ${arg}:\nStatus: ${result.status}\n${result.error ? `Error: ${result.error}` : ''}`;
     await ctx.reply(message);
   } catch (error) {
+    console.log(error);
     await ctx.reply('Error checking site');
   }
 });
