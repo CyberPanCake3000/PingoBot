@@ -6,3 +6,10 @@ export interface Site {
   lastCheck: Date;
   isActive: boolean;
 }
+
+export interface User {
+  userId: string;
+  chatId: string;
+  isActive: boolean;
+  dailyStats: 'on' | 'off';
+}
