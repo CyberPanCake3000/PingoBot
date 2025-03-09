@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import { config } from './config';
 import { MonitorService } from './services/monitor.service';
 import { SiteModel } from './models/site.model';
+import { UserModel } from './models/user.model';
 import axios from 'axios';
 
 const bot = new Bot(config.TELEGRAM_TOKEN);
@@ -19,14 +20,61 @@ bot.command('start', async (ctx) => {
     '/add <url> <interval> - Add a website to monitor (interval in minutes, hours or days)\n' +
     '/list - List monitored websites\n' +
     '/remove <url> - Remove a website from monitoring\n' +
-    '/ping <url> - Check website status once'
+    '/ping <url> - Check website status once\n' +
+    '/daily on/off - Toggle daily stats, list of all your sites and ip addresses will be displayed daily with statistics'
   );
+
+  if (!ctx.from) { 
+    return ctx.reply('Error occured, try again later');
+  }
+
+  const user = await UserModel.findOne({ userId: ctx.from.id.toString() });
+  if (!user) {
+    await UserModel.create({
+      userId: ctx.from.id.toString(),
+      chatId: ctx.chat.id.toString(),
+      isActive: true,
+      dailyStats: 'off',
+    });
+  }
+});
+
+bot.command('daily', async (ctx) => {
+  const args = ctx.match.split(' ');
+  
+  if (!ctx.from) {
+    return ctx.reply('Error occured, try again later');
+  }
+
+  if (!args) {
+    return ctx.reply('Usage: /daily on/off');
+  }
+
+  let setting = 'off';
+
+  if (args[0] === 'on') {
+    setting = 'on';
+  }
+
+  const user = await UserModel.findOne({ userId: ctx.from.id.toString() });
+  if (!user) {
+    await UserModel.create({
+      userId: ctx.from.id.toString(),
+      chatId: ctx.chat.id.toString(),
+      isActive: true,
+      dailyStats: setting,
+    });
+  }
+
+  await UserModel.updateOne({ userId: ctx.from.id.toString() }, { dailyStats: setting });
+
+  ctx.reply(`Daily stats are now ${setting}`);
 });
 
 function parseInterval(value: string): { minutes: number; error?: string } {
   const num = parseFloat(value);
   const unit = value.toLowerCase().replace(/[0-9.]/g, '').trim();
-  
+
   switch (unit) {
     case 'm':
     case 'min':
@@ -37,7 +85,7 @@ function parseInterval(value: string): { minutes: number; error?: string } {
         return { minutes: 0, error: 'Minutes should be between 5 and 60' };
       }
       return { minutes: num };
-      
+
     case 'h':
     case 'hr':
     case 'hrs':
@@ -47,7 +95,7 @@ function parseInterval(value: string): { minutes: number; error?: string } {
         return { minutes: 0, error: 'Hours should be between 1 and 24' };
       }
       return { minutes: num * 60 };
-      
+
     case 'd':
     case 'day':
     case 'days':
@@ -55,7 +103,7 @@ function parseInterval(value: string): { minutes: number; error?: string } {
         return { minutes: 0, error: 'Days should be between 1 and 7' };
       }
       return { minutes: num * 24 * 60 };
-      
+
     default:
       if (num < 5 || num > 60) {
         return { minutes: 0, error: 'Minutes should be between 5 and 60' };
@@ -71,16 +119,16 @@ async function formatUrl(url: string): Promise<string> {
 
   try {
     const httpsUrl = `https://${url}`;
-    await axios.get(httpsUrl, { 
+    await axios.get(httpsUrl, {
       timeout: 5000,
-      validateStatus: () => true 
+      validateStatus: () => true
     });
     return httpsUrl;
   } catch (error) {
     console.log(error);
     try {
       const httpUrl = `http://${url}`;
-      await axios.get(httpUrl, { 
+      await axios.get(httpUrl, {
         timeout: 5000,
         validateStatus: () => true
       });
@@ -127,7 +175,7 @@ bot.command('add', async (ctx) => {
       interval: intervalResult.minutes,
     });
 
-    const intervalText = intervalResult.minutes >= 1440 
+    const intervalText = intervalResult.minutes >= 1440
       ? `${intervalResult.minutes / 1440} days`
       : intervalResult.minutes >= 60
         ? `${intervalResult.minutes / 60} hours`
@@ -210,6 +258,6 @@ bot.command('ping', async (ctx) => {
 
 setInterval(() => {
   monitorService.monitorSites().catch(console.error);
-}, 60000); 
+}, 60000);
 
 bot.start();
