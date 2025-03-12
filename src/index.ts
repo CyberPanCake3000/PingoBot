@@ -1,4 +1,4 @@
-import { Bot, webhookCallback } from 'grammy';
+import { Bot } from 'grammy';
 import mongoose from 'mongoose';
 import { config } from './config';
 import { MonitorService } from './services/monitor.service';
@@ -259,7 +259,5 @@ bot.command('ping', async (ctx) => {
 setInterval(() => {
   monitorService.monitorSites().catch(console.error);
 }, 60000);
-
-export default webhookCallback(bot, "http");
 
 bot.start();
