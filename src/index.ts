@@ -6,6 +6,9 @@ import { SiteModel } from './models/site.model';
 import { UserModel } from './models/user.model';
 import axios from 'axios';
 
+import express from 'express';
+const app = express();
+
 const bot = new Bot(config.TELEGRAM_TOKEN);
 const monitorService = new MonitorService(bot);
 
@@ -261,3 +264,27 @@ setInterval(() => {
 }, 60000);
 
 bot.start();
+
+const PORT = process.env.PORT || 3000;
+const DOMAIN = process.env.DOMAIN || "";
+
+app.use(express.json());
+
+app.use(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
+  bot.handleUpdate(req.body);
+  res.sendStatus(200);
+});
+
+app.get('/', (req, res) => {
+  console.log('Telegram Bot is running!', req, res);
+});
+
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+
+  bot.api.setWebhook(`${DOMAIN}/bot${process.env.BOT_TOKEN}`).then(() => {
+    console.log('Webhook set successfully!');
+  }).catch(err => {
+    console.error('Error setting webhook:', err);
+  });
+});
