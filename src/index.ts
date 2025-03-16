@@ -266,7 +266,6 @@ setInterval(() => {
 bot.start();
 
 const PORT = process.env.PORT || 3000;
-const DOMAIN = process.env.DOMAIN || "";
 
 app.use(express.json());
 
@@ -282,7 +281,7 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 
-  bot.api.setWebhook(`${DOMAIN}/bot${process.env.BOT_TOKEN}`).then(() => {
+  bot.api.setWebhook(`${config.DOMAIN}/bot${process.env.BOT_TOKEN}`).then(() => {
     console.log('Webhook set successfully!');
   }).catch(err => {
     console.error('Error setting webhook:', err);
