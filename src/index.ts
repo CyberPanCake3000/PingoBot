@@ -285,7 +285,6 @@ setInterval(() => {
   monitorService.monitorSites().catch(console.error);
 }, 60000);
 
-bot.start();
 
 const PORT = process.env.PORT || 3000;
 
@@ -308,9 +307,21 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 
-  bot.api.setWebhook(`${config.DOMAIN}/bot${config.TELEGRAM_TOKEN}`).then(() => {
-    console.log('Webhook set successfully!');
-  }).catch(err => {
-    console.error('Error setting webhook:', err);
-  });
+  if (config.DOMAIN) {
+    bot.api.setWebhook(`${config.DOMAIN}/bot${config.TELEGRAM_TOKEN}`)
+      .then(() => {
+        console.log('Webhook set successfully!');
+      })
+      .catch(err => {
+        console.error('Error setting webhook:', err);
+      });
+  } else {
+    console.warn('DOMAIN not set. Webhook was not established.');
+    console.warn('The bot will not receive messages in webhook mode.');
+    
+    console.log('Starting bot in long polling mode for local development...');
+    bot.start().catch(err => {
+      console.error('Error starting bot in long polling mode:', err);
+    });
+  }
 });
