@@ -16,6 +16,28 @@ mongoose.connect(config.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
+async function keepAlive() {
+  try {
+    const botInfo = await bot.api.getMe();
+    console.log(`Keep-alive ping: Bot ${botInfo.username} is active`);
+    
+    if (config.DOMAIN) {
+      try {
+        await axios.get(`${config.DOMAIN}`);
+        console.log('Self-ping successful');
+      } catch {
+        console.log('Self-ping failed, but that\'s okay');
+      }
+    }
+  } catch (error) {
+    console.error('Keep-alive error:', error);
+  }
+}
+
+setInterval(keepAlive, 10 * 60 * 1000);
+
+setTimeout(keepAlive, 5000);
+
 bot.command('start', async (ctx) => {
   await ctx.reply(
     'Welcome to Website Monitor Bot!\n\n' +
@@ -269,19 +291,24 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.use(`/bot${process.env.TELEGRAM_TOKEN}`, (req, res) => {
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
+app.use(`/bot${config.TELEGRAM_TOKEN}`, (req, res) => {
   bot.handleUpdate(req.body);
   res.sendStatus(200);
 });
 
 app.get('/', (req, res) => {
-  console.log('Telegram Bot is running!', req, res);
+  console.log('Telegram Bot is running!');
+  res.status(200).send('Telegram Bot is running!');
 });
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 
-  bot.api.setWebhook(`${config.DOMAIN}/bot${process.env.TELEGRAM_TOKEN}`).then(() => {
+  bot.api.setWebhook(`${config.DOMAIN}/bot${config.TELEGRAM_TOKEN}`).then(() => {
     console.log('Webhook set successfully!');
   }).catch(err => {
     console.error('Error setting webhook:', err);
