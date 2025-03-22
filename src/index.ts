@@ -294,9 +294,15 @@ app.get('/health', (req, res) => {
   res.status(200).send('OK');
 });
 
-app.use(`/bot${config.TELEGRAM_TOKEN}`, (req, res) => {
-  bot.handleUpdate(req.body);
-  res.sendStatus(200);
+app.post(`/bot${config.TELEGRAM_TOKEN}`, async (req, res) => {
+  try {
+    console.log('Webhook update received:', JSON.stringify(req.body).slice(0, 200));
+    await bot.handleUpdate(req.body);
+    res.sendStatus(200);
+  } catch (error) {
+    console.error('Error handling webhook update:', error);
+    res.sendStatus(500);
+  }
 });
 
 app.get('/', (req, res) => {
