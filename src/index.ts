@@ -269,7 +269,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-app.use(`/bot${process.env.BOT_TOKEN}`, (req, res) => {
+app.use(`/bot${process.env.TELEGRAM_TOKEN}`, (req, res) => {
   bot.handleUpdate(req.body);
   res.sendStatus(200);
 });
@@ -281,7 +281,7 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 
-  bot.api.setWebhook(`${config.DOMAIN}/bot${process.env.BOT_TOKEN}`).then(() => {
+  bot.api.setWebhook(`${config.DOMAIN}/bot${process.env.TELEGRAM_TOKEN}`).then(() => {
     console.log('Webhook set successfully!');
   }).catch(err => {
     console.error('Error setting webhook:', err);
