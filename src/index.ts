@@ -281,6 +281,33 @@ bot.command('ping', async (ctx) => {
   }
 });
 
+bot.on("message", async (ctx) => {
+  console.log("Received message:", {
+    messageId: ctx.msg.message_id,
+    from: ctx.from?.id,
+    text: ctx.msg.text,
+    entities: ctx.msg.entities,
+    chat: ctx.chat.id,
+  });
+  if (ctx.msg.text && !ctx.msg.text.startsWith('/')) {
+    await ctx.reply(
+      'Я получил ваше сообщение. Если вы пытаетесь использовать команду, ' +
+      'убедитесь, что она начинается с символа /\n\n' +
+      'Доступные команды:\n' +
+      '/start - Начать работу с ботом\n' +
+      '/add <url> <interval> - Добавить сайт для мониторинга\n' +
+      '/list - Список отслеживаемых сайтов\n' +
+      '/remove <url> - Удалить сайт из мониторинга\n' +
+      '/ping <url> - Проверить статус сайта\n' +
+      '/daily on/off - Включить/выключить ежедневную статистику'
+    );
+  }
+});
+
+bot.catch((err) => {
+  console.error('Bot error:', err);
+});
+
 setInterval(() => {
   monitorService.monitorSites().catch(console.error);
 }, 60000);
@@ -296,7 +323,19 @@ app.get('/health', (req, res) => {
 
 app.post(`/bot${config.TELEGRAM_TOKEN}`, async (req, res) => {
   try {
-    console.log('Webhook update received:', JSON.stringify(req.body).slice(0, 200));
+    // Логируем весь объект update для диагностики
+    console.log('Webhook update received:', JSON.stringify(req.body));
+    
+    // Если обновление содержит сообщение, логируем его отдельно для удобства
+    if (req.body.message) {
+      console.log('Message content:', {
+        text: req.body.message.text,
+        entities: req.body.message.entities,
+        from: req.body.message.from?.id,
+        chat: req.body.message.chat?.id
+      });
+    }
+    
     await bot.handleUpdate(req.body);
     res.sendStatus(200);
   } catch (error) {
@@ -314,7 +353,9 @@ app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 
   if (config.DOMAIN) {
-    bot.api.setWebhook(`${config.DOMAIN}/bot${config.TELEGRAM_TOKEN}`)
+    bot.api.setWebhook(`${config.DOMAIN}/bot${config.TELEGRAM_TOKEN}`, {
+      allowed_updates: ["message", "edited_message", "callback_query"]
+    })
       .then(() => {
         console.log('Webhook set successfully!');
       })
