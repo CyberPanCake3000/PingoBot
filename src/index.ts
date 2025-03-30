@@ -351,13 +351,17 @@ app.get('/', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-
   if (config.DOMAIN) {
-    bot.api.setWebhook(`${config.DOMAIN}/bot${config.TELEGRAM_TOKEN}`, {
+    const domain = config.DOMAIN.endsWith('/') 
+      ? config.DOMAIN.slice(0, -1) 
+      : config.DOMAIN;
+  
+    bot.api.setWebhook(`${domain}/bot${config.TELEGRAM_TOKEN}`, {
       allowed_updates: ["message", "edited_message", "callback_query"]
     })
       .then(() => {
         console.log('Webhook set successfully!');
+        console.log(`Webhook URL: ${domain}/bot${config.TELEGRAM_TOKEN}`);
       })
       .catch(err => {
         console.error('Error setting webhook:', err);
