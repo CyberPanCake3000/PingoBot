@@ -13,6 +13,17 @@ mongoose.connect(config.MONGODB_URI)
   .then(() => console.log('Connected to MongoDB'))
   .catch((err) => console.error('MongoDB connection error:', err));
 
+mongoose.connection.on('disconnected', () => {
+  console.log('MongoDB disconnected. Attempting to reconnect...');
+  mongoose.connect(config.MONGODB_URI)
+    .then(() => console.log('Reconnected to MongoDB'))
+    .catch((err) => console.error('MongoDB reconnection error:', err));
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('MongoDB connection error:', err);
+});
+
 bot.command('start', async (ctx) => {
   await ctx.reply(
     'Welcome to Website Monitor Bot!\n\n' +
@@ -24,7 +35,7 @@ bot.command('start', async (ctx) => {
     '/daily on/off - Toggle daily stats, list of all your sites and ip addresses will be displayed daily with statistics'
   );
 
-  if (!ctx.from) { 
+  if (!ctx.from) {
     return ctx.reply('Error occured, try again later');
   }
 
@@ -41,7 +52,7 @@ bot.command('start', async (ctx) => {
 
 bot.command('daily', async (ctx) => {
   const args = ctx.match.split(' ');
-  
+
   if (!ctx.from) {
     return ctx.reply('Error occured, try again later');
   }
