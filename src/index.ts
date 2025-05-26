@@ -9,19 +9,67 @@ import axios from 'axios';
 const bot = new Bot(config.TELEGRAM_TOKEN);
 const monitorService = new MonitorService(bot);
 
-mongoose.connect(config.MONGODB_URI)
-  .then(() => console.log('Connected to MongoDB'))
-  .catch((err) => console.error('MongoDB connection error:', err));
+// Улучшенное подключение к MongoDB с обработкой переподключений
+async function connectToMongoDB() {
+  try {
+    await mongoose.connect(config.MONGODB_URI, {
+      maxPoolSize: 10, 
+      serverSelectionTimeoutMS: 5000,
+      socketTimeoutMS: 45000,
+      bufferCommands: false,
+    });
+    console.log('Connected to MongoDB');
+  } catch (err) {
+    console.error('MongoDB connection error:', err);
+    setTimeout(connectToMongoDB, 5000);
+  }
+}
 
 mongoose.connection.on('disconnected', () => {
   console.log('MongoDB disconnected. Attempting to reconnect...');
-  mongoose.connect(config.MONGODB_URI)
-    .then(() => console.log('Reconnected to MongoDB'))
-    .catch((err) => console.error('MongoDB reconnection error:', err));
+  connectToMongoDB();
 });
 
 mongoose.connection.on('error', (err) => {
   console.error('MongoDB connection error:', err);
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('MongoDB reconnected');
+});
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('Received SIGINT. Graceful shutdown...');
+  try {
+    await bot.stop();
+    await mongoose.connection.close();
+    console.log('Bot and database connections closed.');
+  } catch (err) {
+    console.error('Error during shutdown:', err);
+  }
+  process.exit(0);
+});
+
+process.on('SIGTERM', async () => {
+  console.log('Received SIGTERM. Graceful shutdown...');
+  try {
+    await bot.stop();
+    await mongoose.connection.close();
+    console.log('Bot and database connections closed.');
+  } catch (err) {
+    console.error('Error during shutdown:', err);
+  }
+  process.exit(0);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
 bot.command('start', async (ctx) => {
@@ -51,13 +99,13 @@ bot.command('start', async (ctx) => {
 });
 
 bot.command('daily', async (ctx) => {
-  const args = ctx.match.split(' ');
+  const args = ctx.match?.split(' ');
 
   if (!ctx.from) {
     return ctx.reply('Error occured, try again later');
   }
 
-  if (!args) {
+  if (!args || args.length === 0) {
     return ctx.reply('Usage: /daily on/off');
   }
 
@@ -156,8 +204,8 @@ bot.command('add', async (ctx) => {
     await ctx.reply("Error occured");
     return;
   }
-  const args = ctx.match.split(' ');
-  if (args.length < 2) {
+  const args = ctx.match?.split(' ');
+  if (!args || args.length < 2) {
     return ctx.reply(
       'Usage: /add <domain> <interval>\n\n' +
       'Examples:\n' +
@@ -220,8 +268,8 @@ bot.command('list', async (ctx) => {
 });
 
 bot.command('remove', async (ctx) => {
-  const url = await formatUrl(ctx.match);
-  if (!url) {
+  const url = await formatUrl(ctx.match || '');
+  if (!url || !ctx.match) {
     return ctx.reply('Usage: /remove <url>');
   }
 
@@ -255,6 +303,7 @@ bot.command('ping', async (ctx) => {
       message += line + '\n';
     }
     await ctx.reply(message);
+    return;
   }
 
   try {
@@ -267,8 +316,49 @@ bot.command('ping', async (ctx) => {
   }
 });
 
-setInterval(() => {
-  monitorService.monitorSites().catch(console.error);
-}, 60000);
+// Функция для запуска мониторинга
+function startMonitoring() {
+  const monitoringInterval = setInterval(() => {
+    monitorService.monitorSites().catch((error) => {
+      console.error('Monitoring error:', error);
+    });
+  }, 60000);
 
-bot.start();
+  // Сохраняем ссылку на интервал для graceful shutdown
+  process.on('SIGINT', () => {
+    clearInterval(monitoringInterval);
+  });
+
+  process.on('SIGTERM', () => {
+    clearInterval(monitoringInterval);
+  });
+
+  console.log('Monitoring started');
+}
+
+// Основная функция запуска
+async function main() {
+  try {
+    console.log('Starting bot...');
+    
+    // Подключаемся к MongoDB
+    await connectToMongoDB();
+    
+    // Запускаем бота
+    await bot.start();
+    console.log('Bot started successfully');
+    
+    // Запускаем мониторинг
+    startMonitoring();
+    
+    // Добавляем обработчик для предотвращения закрытия процесса
+    console.log('Bot is running. Press Ctrl+C to stop.');
+    
+  } catch (error) {
+    console.error('Failed to start bot:', error);
+    process.exit(1);
+  }
+}
+
+// Запускаем приложение
+main();
