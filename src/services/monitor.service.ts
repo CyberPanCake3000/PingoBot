@@ -1,6 +1,11 @@
 import axios from 'axios';
 import { Bot } from 'grammy';
 import { SiteModel } from '../models/site.model';
+import { UserModel } from '../models/user.model';
+
+interface SendMessageOptions {
+  message_thread_id?: number;
+}
 
 export class MonitorService {
   private bot: Bot;
@@ -13,6 +18,9 @@ export class MonitorService {
     try {
       const response = await axios.get(url, {
         timeout: 5000,
+        headers: {
+          'User-Agent': 'PingoBot/1.0 (Website Monitor Bot)'
+        }
       });
       return { status: response.status };
     } catch (error) {
@@ -26,25 +34,99 @@ export class MonitorService {
     }
   }
 
+  private extractChatId(chatIdentifier: string): string {
+    return chatIdentifier.split(':')[0];
+  }
+
+  private extractThreadId(chatIdentifier: string): number | undefined {
+    const parts = chatIdentifier.split(':');
+    return parts.length > 1 ? parseInt(parts[1]) : undefined;
+  }
+
   async monitorSites() {
-    const sites = await SiteModel.find({ isActive: true });
-    
-    for (const site of sites) {
-      const now = new Date();
-      const timeSinceLastCheck = now.getTime() - site.lastCheck.getTime();
-      const intervalMs = site.interval * 60 * 1000;
+    try {
+      const sites = await SiteModel.find({ isActive: true });
+      
+      for (const site of sites) {
+        const now = new Date();
+        const timeSinceLastCheck = now.getTime() - site.lastCheck.getTime();
+        const intervalMs = site.interval * 60 * 1000;
 
-      if (timeSinceLastCheck >= intervalMs) {
-        const checkResult = await this.checkSite(site.url);
-        
-        if (checkResult.status !== 200) {
-          const message = `⚠️ Alert for ${site.url}\nStatus: ${checkResult.status}\n${checkResult.error ? `Error: ${checkResult.error}` : ''}`;
-          await this.bot.api.sendMessage(site.chatId, message);
+        if (timeSinceLastCheck >= intervalMs) {
+          try {
+            const checkResult = await this.checkSite(site.url);
+            
+            if (checkResult.status !== 200) {
+              const message = `⚠️ Alert for ${site.url}\nStatus: ${checkResult.status}\n${checkResult.error ? `Error: ${checkResult.error}` : ''}`;
+              
+              const chatId = this.extractChatId(site.chatId);
+              const threadId = this.extractThreadId(site.chatId);
+              
+              const sendOptions: SendMessageOptions = {};
+              if (threadId) {
+                sendOptions.message_thread_id = threadId;
+              }
+              
+              await this.bot.api.sendMessage(chatId, message, sendOptions);
+            }
+
+            site.lastCheck = now;
+            await site.save();
+          } catch (error) {
+            console.error(`Error monitoring site ${site.url}:`, error);
+          }
         }
-
-        site.lastCheck = now;
-        await site.save();
       }
+    } catch (error) {
+      console.error('Error in monitorSites:', error);
+    }
+  }
+
+  async sendDailyStats() {
+    try {
+      const users = await UserModel.find({ dailyStats: 'on', isActive: true });
+      
+      for (const user of users) {
+        try {
+          const sites = await SiteModel.find({
+            chatId: user.chatId,
+            isActive: true
+          });
+
+          if (sites.length === 0) continue;
+
+          let statsMessage = '📊 Daily Statistics Report\n\n';
+          
+          for (const site of sites) {
+            const result = await this.checkSite(site.url);
+            const status = result.status === 200 ? '✅' : '❌';
+            const intervalText = site.interval >= 1440
+              ? `${site.interval / 1440}d`
+              : site.interval >= 60
+                ? `${site.interval / 60}h`
+                : `${site.interval}m`;
+            
+            statsMessage += `${status} ${site.url} (${intervalText})\n`;
+            if (result.status !== 200) {
+              statsMessage += `   Error: ${result.error || 'Unknown error'}\n`;
+            }
+          }
+
+          const chatId = this.extractChatId(user.chatId);
+          const threadId = this.extractThreadId(user.chatId);
+          
+          const sendOptions: SendMessageOptions = {};
+          if (threadId) {
+            sendOptions.message_thread_id = threadId;
+          }
+          
+          await this.bot.api.sendMessage(chatId, statsMessage, sendOptions);
+        } catch (error) {
+          console.error(`Error sending daily stats to user ${user.userId}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('Error in sendDailyStats:', error);
     }
   }
 }
