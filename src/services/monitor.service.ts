@@ -45,18 +45,22 @@ export class MonitorService {
 
   async monitorSites() {
     try {
+      console.log(`[${new Date().toISOString()}] Starting site monitoring...`);
       const sites = await SiteModel.find({ isActive: true });
+      console.log(`Found ${sites.length} active sites to monitor`);
       
       for (const site of sites) {
         const now = new Date();
         const timeSinceLastCheck = now.getTime() - site.lastCheck.getTime();
         const intervalMs = site.interval * 60 * 1000;
-
+  
         if (timeSinceLastCheck >= intervalMs) {
           try {
+            console.log(`Checking ${site.url}...`);
             const checkResult = await this.checkSite(site.url);
             
             if (checkResult.status !== 200) {
+              console.log(`Alert needed for ${site.url}, status: ${checkResult.status}`);
               const message = `⚠️ Alert for ${site.url}\nStatus: ${checkResult.status}\n${checkResult.error ? `Error: ${checkResult.error}` : ''}`;
               
               const chatId = this.extractChatId(site.chatId);
@@ -67,13 +71,16 @@ export class MonitorService {
                 sendOptions.message_thread_id = threadId;
               }
               
+              console.log(`Sending message to chat ${chatId}...`);
               await this.bot.api.sendMessage(chatId, message, sendOptions);
+              console.log(`Message sent successfully`);
             }
-
+  
             site.lastCheck = now;
             await site.save();
           } catch (error) {
             console.error(`Error monitoring site ${site.url}:`, error);
+            console.error('Error details:', error);
           }
         }
       }

@@ -1,4 +1,4 @@
-import { Bot } from 'grammy';
+import { Bot, Context } from 'grammy';
 import mongoose from 'mongoose';
 import { config } from './config';
 import { MonitorService } from './services/monitor.service';
@@ -9,21 +9,26 @@ import axios from 'axios';
 const bot = new Bot(config.TELEGRAM_TOKEN);
 const monitorService = new MonitorService(bot);
 
-// Улучшенное подключение к MongoDB с обработкой переподключений
 async function connectToMongoDB() {
   try {
+    console.log('Attempting to connect to MongoDB...');
+    console.log('MongoDB URI:', config.MONGODB_URI.replace(/\/\/[^:]+:[^@]+@/, '//***:***@')); // Скрываем пароль
+    
     await mongoose.connect(config.MONGODB_URI, {
       maxPoolSize: 10, 
-      serverSelectionTimeoutMS: 5000,
+      serverSelectionTimeoutMS: 10000,
       socketTimeoutMS: 45000,
       bufferCommands: false,
     });
     console.log('Connected to MongoDB');
   } catch (err) {
     console.error('MongoDB connection error:', err);
-    setTimeout(connectToMongoDB, 5000);
+    console.error('Error details:', err);
+    
+    setTimeout(connectToMongoDB, 10000); 
   }
 }
+
 
 mongoose.connection.on('disconnected', () => {
   console.log('MongoDB disconnected. Attempting to reconnect...');
@@ -38,30 +43,21 @@ mongoose.connection.on('reconnected', () => {
   console.log('MongoDB reconnected');
 });
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  console.log('Received SIGINT. Graceful shutdown...');
+async function gracefulShutdown(signal: string) {
+  console.log(`Received ${signal}. Graceful shutdown...`);
   try {
     await bot.stop();
     await mongoose.connection.close();
     console.log('Bot and database connections closed.');
+    process.exit(0);
   } catch (err) {
     console.error('Error during shutdown:', err);
+    process.exit(1);
   }
-  process.exit(0);
-});
+}
 
-process.on('SIGTERM', async () => {
-  console.log('Received SIGTERM. Graceful shutdown...');
-  try {
-    await bot.stop();
-    await mongoose.connection.close();
-    console.log('Bot and database connections closed.');
-  } catch (err) {
-    console.error('Error during shutdown:', err);
-  }
-  process.exit(0);
-});
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 
 process.on('unhandledRejection', (reason, promise) => {
   console.error('Unhandled Rejection at:', promise, 'reason:', reason);
@@ -72,7 +68,19 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+function getThreadId(ctx: Context): number | undefined {
+  return ctx.message?.message_thread_id || ctx.update?.message?.message_thread_id;
+}
+
+function getChatIdentifier(ctx: Context): string {
+  const chatId = ctx.chat!.id.toString();
+  const threadId = getThreadId(ctx);
+  return threadId ? `${chatId}:${threadId}` : chatId;
+}
+
 bot.command('start', async (ctx) => {
+  const threadId = getThreadId(ctx);
+  
   await ctx.reply(
     'Welcome to Website Monitor Bot!\n\n' +
     'Commands:\n' +
@@ -80,18 +88,26 @@ bot.command('start', async (ctx) => {
     '/list - List monitored websites\n' +
     '/remove <url> - Remove a website from monitoring\n' +
     '/ping <url> - Check website status once\n' +
-    '/daily on/off - Toggle daily stats, list of all your sites and ip addresses will be displayed daily with statistics'
+    '/daily on/off - Toggle daily stats, list of all your sites and ip addresses will be displayed daily with statistics' +
+    (threadId ? `\n\n🧵 Working in topic thread: ${threadId}` : ''),
+    { message_thread_id: threadId }
   );
 
   if (!ctx.from) {
-    return ctx.reply('Error occured, try again later');
+    return ctx.reply('Error occured, try again later', { message_thread_id: threadId });
   }
 
-  const user = await UserModel.findOne({ userId: ctx.from.id.toString() });
+  const chatIdentifier = getChatIdentifier(ctx);
+  const user = await UserModel.findOne({ 
+    userId: ctx.from.id.toString(),
+    chatId: chatIdentifier
+  });
+  
   if (!user) {
     await UserModel.create({
       userId: ctx.from.id.toString(),
-      chatId: ctx.chat.id.toString(),
+      chatId: chatIdentifier,
+      threadId: threadId,
       isActive: true,
       dailyStats: 'off',
     });
@@ -100,13 +116,14 @@ bot.command('start', async (ctx) => {
 
 bot.command('daily', async (ctx) => {
   const args = ctx.match?.split(' ');
+  const threadId = getThreadId(ctx);
 
   if (!ctx.from) {
-    return ctx.reply('Error occured, try again later');
+    return ctx.reply('Error occured, try again later', { message_thread_id: threadId });
   }
 
   if (!args || args.length === 0) {
-    return ctx.reply('Usage: /daily on/off');
+    return ctx.reply('Usage: /daily on/off', { message_thread_id: threadId });
   }
 
   let setting = 'off';
@@ -115,19 +132,28 @@ bot.command('daily', async (ctx) => {
     setting = 'on';
   }
 
-  const user = await UserModel.findOne({ userId: ctx.from.id.toString() });
+  const chatIdentifier = getChatIdentifier(ctx);
+  const user = await UserModel.findOne({ 
+    userId: ctx.from.id.toString(),
+    chatId: chatIdentifier
+  });
+  
   if (!user) {
     await UserModel.create({
       userId: ctx.from.id.toString(),
-      chatId: ctx.chat.id.toString(),
+      chatId: chatIdentifier,
+      threadId: threadId,
       isActive: true,
       dailyStats: setting,
     });
+  } else {
+    await UserModel.updateOne(
+      { userId: ctx.from.id.toString(), chatId: chatIdentifier }, 
+      { dailyStats: setting }
+    );
   }
 
-  await UserModel.updateOne({ userId: ctx.from.id.toString() }, { dailyStats: setting });
-
-  ctx.reply(`Daily stats are now ${setting}`);
+  ctx.reply(`Daily stats are now ${setting}`, { message_thread_id: threadId });
 });
 
 function parseInterval(value: string): { minutes: number; error?: string } {
@@ -200,10 +226,13 @@ async function formatUrl(url: string): Promise<string> {
 }
 
 bot.command('add', async (ctx) => {
+  const threadId = getThreadId(ctx);
+  
   if (!ctx.from) {
-    await ctx.reply("Error occured");
+    await ctx.reply("Error occured", { message_thread_id: threadId });
     return;
   }
+  
   const args = ctx.match?.split(' ');
   if (!args || args.length < 2) {
     return ctx.reply(
@@ -215,7 +244,8 @@ bot.command('add', async (ctx) => {
       'Intervals:\n' +
       '- Minutes (m): 5-60\n' +
       '- Hours (h): 1-24\n' +
-      '- Days (d): 1-7'
+      '- Days (d): 1-7',
+      { message_thread_id: threadId }
     );
   }
 
@@ -223,14 +253,17 @@ bot.command('add', async (ctx) => {
   const intervalResult = parseInterval(args[1]);
 
   if (intervalResult.error) {
-    return ctx.reply(`Error: ${intervalResult.error}`);
+    return ctx.reply(`Error: ${intervalResult.error}`, { message_thread_id: threadId });
   }
 
   try {
+    const chatIdentifier = getChatIdentifier(ctx);
+    
     await SiteModel.create({
       url: formattedUrl,
       userId: ctx.from.id.toString(),
-      chatId: ctx.chat.id.toString(),
+      chatId: chatIdentifier,
+      threadId: threadId,
       interval: intervalResult.minutes,
     });
 
@@ -242,123 +275,162 @@ bot.command('add', async (ctx) => {
 
     await ctx.reply(
       `✅ Added ${formattedUrl} to monitoring\n` +
-      `⏰ Check interval: ${intervalText}`
+      `⏰ Check interval: ${intervalText}`,
+      { message_thread_id: threadId }
     );
   } catch (error) {
     console.log(error);
-    await ctx.reply('❌ Error adding site to monitoring');
+    await ctx.reply('❌ Error adding site to monitoring', { message_thread_id: threadId });
   }
 });
 
 bot.command('list', async (ctx) => {
+  const threadId = getThreadId(ctx);
+  const chatIdentifier = getChatIdentifier(ctx);
+  
   const sites = await SiteModel.find({
-    chatId: ctx.chat.id.toString(),
+    chatId: chatIdentifier,
     isActive: true,
   });
 
   if (sites.length === 0) {
-    return ctx.reply('No sites are being monitored');
+    return ctx.reply('No sites are being monitored', { message_thread_id: threadId });
   }
 
   const sitesList = sites
     .map(site => `${site.url} (every ${site.interval} minutes)`)
     .join('\n');
 
-  await ctx.reply(`Monitored sites:\n${sitesList}`);
+  await ctx.reply(`Monitored sites:\n${sitesList}`, { message_thread_id: threadId });
 });
 
 bot.command('remove', async (ctx) => {
+  const threadId = getThreadId(ctx);
   const url = await formatUrl(ctx.match || '');
+  
   if (!url || !ctx.match) {
-    return ctx.reply('Usage: /remove <url>');
+    return ctx.reply('Usage: /remove <url>', { message_thread_id: threadId });
   }
 
   try {
+    const chatIdentifier = getChatIdentifier(ctx);
+    
     await SiteModel.updateOne(
-      { url, chatId: ctx.chat.id.toString() },
+      { url, chatId: chatIdentifier },
       { isActive: false }
     );
-    await ctx.reply(`Removed ${url} from monitoring`);
+    await ctx.reply(`Removed ${url} from monitoring`, { message_thread_id: threadId });
   } catch (error) {
     console.log(error);
-    await ctx.reply('Error removing site from monitoring');
+    await ctx.reply('Error removing site from monitoring', { message_thread_id: threadId });
   }
 });
 
 bot.command('ping', async (ctx) => {
+  const threadId = getThreadId(ctx);
   const arg = ctx.match;
+  
   if (!arg) {
-    return ctx.reply('Usage: /ping <url>');
+    return ctx.reply('Usage: /ping <url>', { message_thread_id: threadId });
   }
 
   if (arg === 'all') {
+    const chatIdentifier = getChatIdentifier(ctx);
     const sites = await SiteModel.find({
-      chatId: ctx.chat.id.toString(),
+      chatId: chatIdentifier,
       isActive: true,
     });
+    
     let message = '';
     for (const site of sites) {
       const result = await monitorService.checkSite(site.url);
       const line = `Status for ${site.url}:\nStatus: ${result.status}\n${result.error ? `Error: ${result.error}` : ''}`;
       message += line + '\n';
     }
-    await ctx.reply(message);
+    await ctx.reply(message, { message_thread_id: threadId });
     return;
   }
 
   try {
     const result = await monitorService.checkSite(arg);
     const message = `Status for ${arg}:\nStatus: ${result.status}\n${result.error ? `Error: ${result.error}` : ''}`;
-    await ctx.reply(message);
+    await ctx.reply(message, { message_thread_id: threadId });
   } catch (error) {
     console.log(error);
-    await ctx.reply('Error checking site');
+    await ctx.reply('Error checking site', { message_thread_id: threadId });
   }
 });
 
 // Функция для запуска мониторинга
-function startMonitoring() {
+async function startMonitoring() {
+  console.log('Monitoring started');
+
   const monitoringInterval = setInterval(() => {
     monitorService.monitorSites().catch((error) => {
       console.error('Monitoring error:', error);
     });
   }, 60000);
 
-  // Сохраняем ссылку на интервал для graceful shutdown
-  process.on('SIGINT', () => {
+  const cleanup = () => {
     clearInterval(monitoringInterval);
-  });
+  };
 
-  process.on('SIGTERM', () => {
-    clearInterval(monitoringInterval);
-  });
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
 
-  console.log('Monitoring started');
+  return cleanup;
 }
 
-// Основная функция запуска
 async function main() {
   try {
     console.log('Starting bot...');
+    console.log('Environment:', process.env.NODE_ENV);
+    console.log('Process ID:', process.pid);
     
-    // Подключаемся к MongoDB
+    if (!config.TELEGRAM_TOKEN) {
+      throw new Error('TELEGRAM_TOKEN is not set!');
+    }
+    
+    try {
+      const testBot = new Bot(config.TELEGRAM_TOKEN);
+      const me = await testBot.api.getMe();
+      console.log('Bot info:', me);
+    } catch (error) {
+      console.error('Cannot connect to Telegram:', error);
+      throw error;
+    }
+    
     await connectToMongoDB();
     
-    // Запускаем бота
-    await bot.start();
+    await bot.start({
+      onStart: (botInfo) => {
+        console.log(`Bot @${botInfo.username} started successfully`);
+      },
+    });
+    
     console.log('Bot started successfully');
     
-    // Запускаем мониторинг
-    startMonitoring();
+    await startMonitoring();
     
-    // Добавляем обработчик для предотвращения закрытия процесса
     console.log('Bot is running. Press Ctrl+C to stop.');
     
   } catch (error) {
     console.error('Failed to start bot:', error);
-    process.exit(1);
+    
+    if (error instanceof Error && error.message.includes('409')) {
+      console.log('Another instance is running. Waiting 30 seconds...');
+      setTimeout(() => {
+        process.exit(1);
+      }, 30000);
+    } else {
+      process.exit(1);
+    }
   }
 }
 
-// Запускаем приложение
-main();
+
+if (require.main === module) {
+  main();
+}
+
+export { main };
